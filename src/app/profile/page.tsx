@@ -1,20 +1,37 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { DeleteAccountButton } from "@/components/profile/delete-account-button";
-import { SignOutButton } from "@/components/profile/sign-out-button";
+import ProfileClient from "./profile-client";
+
+export const dynamic = "force-dynamic";
 
 export default async function ProfilePage() {
   const { user, profile } = await requireAuth();
   const supabase = await createClient();
 
-  const { data: membership } = await supabase
-    .from("organization_members")
-    .select("organization_id, role, organizations(id, display_name, legal_name, status, contact_email, website)")
-    .eq("user_id", user.id);
+  const isOrg = profile?.role === "organization";
+  const isAdmin = profile?.role === "admin";
+  const isSupporter = profile?.role === "supporter" || (!isOrg && !isAdmin);
 
-  const primaryOrganization = membership?.[0]?.organizations as
+  // Run membership query in parallel with role-specific data
+  const [membershipResult, roleData] = await Promise.all([
+    // 1. Organization memberships
+    supabase
+      .from("organization_members")
+      .select("organization_id, role, organizations(id, display_name, legal_name, status, contact_email, website)")
+      .eq("user_id", user.id),
+
+    // 2. Role-specific data (admin stats OR donor lookup)
+    isAdmin
+      ? fetchAdminStats(supabase)
+      : isSupporter
+        ? fetchSupporterData(supabase, user.email ?? "")
+        : Promise.resolve(null),
+  ]);
+
+  const membership = membershipResult.data;
+  const firstOrg = membership?.[0]?.organizations;
+  const primaryOrganization = (Array.isArray(firstOrg) ? firstOrg[0] : firstOrg) as
     | {
         id: string;
         display_name: string;
@@ -24,86 +41,110 @@ export default async function ProfilePage() {
         website: string | null;
       }
     | undefined;
-  const isOrganization = profile?.role === "organization";
+
+  const mappedMemberships = (membership ?? []).map((m: any) => {
+    const org = Array.isArray(m.organizations) ? m.organizations[0] : m.organizations;
+    return {
+      organization_id: m.organization_id,
+      role: m.role,
+      organizations: org ? { display_name: org.display_name } : null,
+    };
+  });
+
+  const adminStats = isAdmin ? (roleData as any) : undefined;
+  const supporterResult = isSupporter ? (roleData as any) : null;
 
   return (
-    <div className="min-h-screen bg-[#f6f1ea] px-6 py-10 md:px-10">
-      <div className="mx-auto max-w-4xl space-y-6">
-        <h1 className="text-4xl font-bold text-[#5c3418]">{isOrganization ? "Organization Profile" : "Your Profile"}</h1>
-
-        <section className="rounded-2xl border border-[#e3d5c7] bg-[#fff9f2] p-6">
-          <p className="text-sm uppercase tracking-[0.12em] text-[#9c5f30]">Account</p>
-          <div className="mt-3 space-y-2 text-[#6f513d]">
-            <p>
-              <span className="font-semibold">Name:</span> {profile?.full_name ?? "Not set"}
-            </p>
-            <p>
-              <span className="font-semibold">Email:</span> {user.email}
-            </p>
-            <p>
-              <span className="font-semibold">Role:</span> {profile?.role ?? "Not set"}
-            </p>
-          </div>
-          {profile?.role === "admin" ? (
-            <div className="mt-4">
-              <Link
-                href="/admin"
-                className="inline-flex items-center rounded-full bg-[#a56131] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#8f4f25]"
-              >
-                Open Admin Dashboard
-              </Link>
-            </div>
-          ) : null}
-          <SignOutButton />
-          <DeleteAccountButton />
-        </section>
-
-        {isOrganization ? (
-          <section className="rounded-2xl border border-[#e3d5c7] bg-[#fff9f2] p-6">
-            <p className="text-sm uppercase tracking-[0.12em] text-[#9c5f30]">Organization</p>
-            {primaryOrganization ? (
-              <div className="mt-3 space-y-2 text-[#6f513d]">
-                <p>
-                  <span className="font-semibold">Display Name:</span> {primaryOrganization.display_name}
-                </p>
-                <p>
-                  <span className="font-semibold">Legal Name:</span> {primaryOrganization.legal_name}
-                </p>
-                <p>
-                  <span className="font-semibold">Status:</span> {primaryOrganization.status}
-                </p>
-                <p>
-                  <span className="font-semibold">Contact Email:</span> {primaryOrganization.contact_email}
-                </p>
-                <p>
-                  <span className="font-semibold">Website:</span> {primaryOrganization.website ?? "Not set"}
-                </p>
-              </div>
-            ) : (
-              <p className="mt-3 text-[#6f513d]">
-                Organization details are not linked yet. Submit your organization application to create the profile.
-              </p>
-            )}
-          </section>
-        ) : null}
-
-        <section className="rounded-2xl border border-[#e3d5c7] bg-white p-6">
-          <p className="text-sm uppercase tracking-[0.12em] text-[#9c5f30]">Organization Membership</p>
-          {membership?.length ? (
-            <ul className="mt-3 space-y-2 text-[#6f513d]">
-              {membership.map((item: any) => (
-                <li key={item.organization_id}>
-                  Org: {(item.organizations as { display_name?: string } | null)?.display_name ?? item.organization_id} (
-                  {item.role})
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-3 text-[#6f513d]">No organization memberships linked yet.</p>
-          )}
-        </section>
-
-      </div>
-    </div>
+    <ProfileClient
+      user={{ email: user.email ?? "" }}
+      profile={profile}
+      donations={supporterResult?.donations ?? []}
+      supporterStats={isSupporter ? (supporterResult?.stats ?? { totalDonated: 0, donationCount: 0, approvedCount: 0, pendingCount: 0, rejectedCount: 0 }) : undefined}
+      adminStats={adminStats}
+      organization={primaryOrganization}
+      memberships={mappedMemberships}
+    />
   );
+}
+
+async function fetchAdminStats(supabase: any) {
+  const [campaignsRes, updatesRes, orgsRes, donationsRes] = await Promise.all([
+    supabase.from("campaigns").select("id", { count: "exact", head: true }).eq("status", "pending"),
+    supabase.from("updates").select("id", { count: "exact", head: true }).eq("status", "pending"),
+    supabase.from("organizations").select("id", { count: "exact", head: true }).eq("status", "pending"),
+    supabase.from("campaign_donations").select("id", { count: "exact", head: true }).eq("status", "pending"),
+  ]);
+
+  return {
+    pendingCampaigns: campaignsRes.count ?? 0,
+    pendingUpdates: updatesRes.count ?? 0,
+    pendingOrganizations: orgsRes.count ?? 0,
+    pendingDonations: donationsRes.count ?? 0,
+  };
+}
+
+async function fetchSupporterData(supabase: any, email: string) {
+  const { data: donor } = await supabase
+    .from("donor_registry")
+    .select("donor_id")
+    .eq("donor_email", email)
+    .maybeSingle();
+
+  if (!donor) {
+    return { donations: [], stats: { totalDonated: 0, donationCount: 0, approvedCount: 0, pendingCount: 0, rejectedCount: 0 } };
+  }
+
+  const { data: fetchedDonations } = await supabase
+    .from("campaign_donations")
+    .select("id, amount, status, created_at, is_anonymous, receipt_path, campaigns(title)")
+    .eq("donor_id", donor.donor_id)
+    .order("created_at", { ascending: false });
+
+  if (!fetchedDonations) {
+    return { donations: [], stats: { totalDonated: 0, donationCount: 0, approvedCount: 0, pendingCount: 0, rejectedCount: 0 } };
+  }
+
+  let totalDonated = 0;
+  let approvedCount = 0;
+  let pendingCount = 0;
+  let rejectedCount = 0;
+
+  for (const d of fetchedDonations) {
+    const amt = Number(d.amount ?? 0);
+    if (d.status === "approved") {
+      totalDonated += amt;
+      approvedCount++;
+    } else if (d.status === "pending") {
+      pendingCount++;
+    } else if (d.status === "rejected") {
+      rejectedCount++;
+    }
+  }
+
+  // Generate secure signed URLs for donor's own receipts in parallel
+  const donations = await Promise.all(
+    fetchedDonations.map(async (d: any) => {
+      let receiptUrl: string | null = null;
+      if (d.receipt_path) {
+        const { data: signed } = await supabase.storage
+          .from("donation-receipts")
+          .createSignedUrl(d.receipt_path, 3600);
+        receiptUrl = signed?.signedUrl ?? null;
+      }
+      return {
+        ...d,
+        receipt_url: receiptUrl,
+        amount: Number(d.amount ?? 0),
+        status: d.status,
+        created_at: d.created_at,
+        is_anonymous: d.is_anonymous,
+        campaigns: d.campaigns,
+      };
+    })
+  );
+
+  return {
+    donations,
+    stats: { totalDonated, donationCount: fetchedDonations.length, approvedCount, pendingCount, rejectedCount },
+  };
 }

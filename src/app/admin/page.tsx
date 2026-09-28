@@ -1,81 +1,101 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { requireAdminPageAccess } from "@/lib/admin-access";
-import { createClient } from "@/lib/supabase/server";
-import { Card } from "@/components/ui/card";
-import { StatusPill } from "@/components/ui/status-pill";
-import { OrganizationReviewActions } from "@/components/admin/organization-review-actions";
-import { ModerationActions } from "@/components/admin/moderation-actions";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { AdminClient } from "./admin-client";
+import { safeExternalUrl } from "@/lib/utils";
 
-type ModerationItem = {
-  table: "campaigns" | "projects" | "updates";
-  id: string;
-  title: string;
-  status: "pending" | "approved" | "rejected" | "published" | "draft";
-};
+const DONATION_RECEIPTS_BUCKET = "donation-receipts";
 
 export default async function AdminPage() {
   await requireAdminPageAccess();
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
-  const [organizationsRes, campaignsRes, projectsRes, updatesRes] = await Promise.all([
-    supabase.from("organizations").select("id, display_name, description, status").order("created_at", { ascending: false }),
+  const [organizationsRes, campaignsRes, projectsRes, updatesRes, donationsRes, orgLogsRes] = await Promise.all([
+    supabase
+      .from("organizations")
+      .select(
+        "id, legal_name, display_name, description, website, contact_email, status, created_at, updated_at, applicant:created_by(full_name)",
+      )
+      .order("created_at", { ascending: false }),
     supabase.from("campaigns").select("id, title, status").eq("status", "pending").order("created_at", { ascending: false }),
     supabase.from("projects").select("id, title, status").eq("status", "pending").order("created_at", { ascending: false }),
     supabase.from("updates").select("id, title, status").eq("status", "pending").order("created_at", { ascending: false }),
+    supabase
+      .from("campaign_donations")
+      .select("id, donor_name, is_anonymous, amount, receipt_path, status, created_at, campaigns(title)")
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(50),
+    supabase
+      .from("moderation_logs")
+      .select("id, target_id, action, notes, created_at")
+      .eq("target_type", "organization")
+      .order("created_at", { ascending: false })
+      .limit(200),
   ]);
 
-  const moderationQueue: ModerationItem[] = [
+  // Group decision history per organization so each card can render its own trail.
+  const historyByOrg = new Map<string, { id: string; action: string; notes: string | null; createdAt: string }[]>();
+  for (const log of (orgLogsRes.data ?? []) as any[]) {
+    const bucket = historyByOrg.get(log.target_id) ?? [];
+    bucket.push({
+      id: log.id as string,
+      action: log.action as string,
+      notes: (log.notes as string | null) ?? null,
+      createdAt: log.created_at as string,
+    });
+    historyByOrg.set(log.target_id, bucket);
+  }
+
+  const organizations = ((organizationsRes.data ?? []) as any[]).map((org) => {
+    const applicant = Array.isArray(org.applicant) ? org.applicant[0] : org.applicant;
+    return {
+      id: org.id as string,
+      legalName: org.legal_name as string,
+      displayName: org.display_name as string,
+      description: org.description as string,
+      website: safeExternalUrl(org.website as string | null),
+      contactEmail: org.contact_email as string,
+      status: org.status as "pending" | "approved" | "rejected" | "published" | "draft",
+      applicantName: (applicant?.full_name as string | null) ?? null,
+      createdAt: org.created_at as string,
+      updatedAt: org.updated_at as string,
+      history: historyByOrg.get(org.id as string) ?? [],
+    };
+  });
+
+  const pendingDonations = await Promise.all(
+    (donationsRes.data ?? []).map(async (d: any) => {
+      let receiptUrl: string | null = null;
+      if (d.receipt_path) {
+        const { data: signed } = await supabase.storage
+          .from(DONATION_RECEIPTS_BUCKET)
+          .createSignedUrl(d.receipt_path, 60 * 60);
+        receiptUrl = signed?.signedUrl ?? null;
+      }
+      const campaign = Array.isArray(d.campaigns) ? d.campaigns[0] : d.campaigns;
+      return {
+        id: d.id as string,
+        donorName: d.is_anonymous ? "Anonymous" : (d.donor_name as string),
+        amount: Number(d.amount ?? 0),
+        campaignTitle: (campaign?.title as string) ?? "—",
+        receiptUrl,
+        createdAt: d.created_at as string,
+      };
+    }),
+  );
+
+  const moderationQueue = [
     ...((campaignsRes.data ?? []).map((item: any) => ({ ...item, table: "campaigns" as const }))),
     ...((projectsRes.data ?? []).map((item: any) => ({ ...item, table: "projects" as const }))),
     ...((updatesRes.data ?? []).map((item: any) => ({ ...item, table: "updates" as const }))),
   ];
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 md:px-8">
-      <h1 className="text-3xl font-semibold text-amber-900">Admin Dashboard</h1>
-      <p className="mt-2 text-slate-600">Approve organizations and moderate public content.</p>
-
-      <section className="mt-6 grid gap-4 md:grid-cols-2">
-        <Card title="Organization approvals" description="Review pending applications before publication rights are granted.">
-          <div className="space-y-3">
-            {organizationsRes.data?.map((org: any) => (
-              <article key={org.id} className="rounded-lg border border-slate-200 p-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold">{org.display_name}</h3>
-                  <StatusPill status={org.status} />
-                </div>
-                <p className="mt-1 text-sm text-slate-700">{org.description}</p>
-                {org.status === "pending" ? (
-                  <div className="mt-3">
-                    <OrganizationReviewActions organizationId={org.id} />
-                  </div>
-                ) : null}
-              </article>
-            ))}
-            {!organizationsRes.data?.length ? <p className="text-sm text-slate-600">No organizations found.</p> : null}
-          </div>
-        </Card>
-
-        <Card title="Moderation queue" description="Content waiting for publish review.">
-          <div className="space-y-3">
-            {moderationQueue.map((item: any) => (
-              <article key={item.id} className="rounded-lg border border-slate-200 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="font-medium text-slate-900">{item.title}</p>
-                    <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">{item.table.slice(0, -1)}</p>
-                  </div>
-                  <StatusPill status={item.status} />
-                </div>
-                <div className="mt-3">
-                  <ModerationActions table={item.table} itemId={item.id} />
-                </div>
-              </article>
-            ))}
-            {!moderationQueue.length ? <p className="text-sm text-slate-600">No pending content in queue.</p> : null}
-          </div>
-        </Card>
-      </section>
-    </div>
+    <AdminClient
+      organizations={organizations}
+      moderationQueue={moderationQueue}
+      pendingDonations={pendingDonations}
+    />
   );
 }
