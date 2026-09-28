@@ -12,8 +12,8 @@ function extractUpdateImage(details: string) {
 }
 
 export default async function UpdatesPage() {
-  const supabase = createAdminClient();
   const adminUnlocked = await isAdminUnlocked();
+  const supabase = createAdminClient();
   const { data: updates } = await supabase
     .from("updates")
     .select("id, title, details, created_at, organizations(display_name)")

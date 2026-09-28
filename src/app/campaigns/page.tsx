@@ -6,8 +6,8 @@ import { CampaignQuickForm } from "@/components/forms/campaign-quick-form";
 import { CampaignCard } from "@/components/campaigns/campaign-card";
 
 export default async function CampaignsPage() {
-  const supabase = createAdminClient();
   const adminUnlocked = await isAdminUnlocked();
+  const supabase = createAdminClient();
   const { data: campaigns } = await supabase
     .from("campaigns")
     .select("id, title, summary, image_url, card_number, contact_number, amount_needed, amount_raised")

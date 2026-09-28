@@ -6,8 +6,8 @@ import { CampaignQuickForm } from "@/components/forms/campaign-quick-form";
 import { CampaignCard } from "@/components/campaigns/campaign-card";
 
 export default async function ClothesDonationPage() {
-  const supabase = createAdminClient();
   const adminUnlocked = await isAdminUnlocked();
+  const supabase = createAdminClient();
 
   const { data: campaigns } = await supabase
     .from("campaigns")

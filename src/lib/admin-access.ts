@@ -9,9 +9,10 @@ export function getAdminPasscode() {
 }
 
 export async function isAdminUnlocked() {
+  // Read cookies first so callers always render dynamically, even without ADMIN_PASSCODE at build time.
+  const cookieStore = await cookies();
   const passcode = getAdminPasscode();
   if (!passcode) return false;
-  const cookieStore = await cookies();
   return cookieStore.get(ADMIN_COOKIE)?.value === passcode;
 }
 
