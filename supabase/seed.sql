@@ -1,4 +1,6 @@
 -- Kindora seed data
+-- LOCAL DEVELOPMENT ONLY. Never run against production: it creates accounts with a public password.
+-- To remove it from a database, run supabase/cleanup_demo_data.sql.
 -- This script creates 3 users: admin, organization, supporter.
 -- Password for all seeded users: Passw0rd!
 
