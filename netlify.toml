@@ -4,3 +4,5 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # NEXT_PUBLIC_* values are inlined into the browser bundle by design; don't flag them as leaked secrets.
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY,NEXT_PUBLIC_SITE_URL,NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY"
