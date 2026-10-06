@@ -17,7 +17,7 @@ const getCampaigns = unstable_cache(
     return data;
   },
   ["campaigns-published"],
-  { revalidate: 60 }
+  { revalidate: 60, tags: ["campaigns-published"] }
 );
 
 export default async function CampaignsPage() {

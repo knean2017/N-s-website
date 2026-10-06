@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { HandCoins, History, Loader2, Upload } from "lucide-react";
+import { Check, Copy, HandCoins, History, Loader2, Pencil, Phone, Upload } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { useRouter } from "next/navigation";
 import { useLanguage } from "@/lib/i18n/context";
 import { compressImage } from "@/lib/image";
+import { CampaignQuickForm } from "@/components/forms/campaign-quick-form";
 
 type HistoryItem = {
   id: string;
@@ -56,8 +57,12 @@ export function CampaignCard({ id, title, summary, imageUrl, cardNumber, contact
   const [thankYouMessage, setThankYouMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
+  const [cardCopied, setCardCopied] = useState(false);
   const router = useRouter();
 
+  const fundedPercent = amountNeeded > 0 ? Math.min(100, Math.round((amountRaised / amountNeeded) * 100)) : 0;
   const fullyFunded = amountRaised >= amountNeeded;
   const visuallyDone = clothesOnly ? isDone : fullyFunded;
   const identityReady = clothesOnly ? true : !!selectedDonorId;
@@ -78,6 +83,27 @@ export function CampaignCard({ id, title, summary, imageUrl, cardNumber, contact
     setReceiptPath("");
     setReceiptLabel("");
     setError(null);
+  }
+
+  async function runAdminAction(url: string, init: RequestInit) {
+    const res = await fetch(url, init);
+    if (!res.ok) {
+      alert(t.donation.actionFailed);
+      return;
+    }
+    router.refresh();
+  }
+
+  async function copyCardNumber() {
+    if (!cardNumber) return;
+    try {
+      // Banking apps accept the bare digits more reliably than the grouped display form.
+      await navigator.clipboard.writeText(cardNumber.replace(/\D/g, ""));
+      setCardCopied(true);
+      setTimeout(() => setCardCopied(false), 2000);
+    } catch {
+      // Clipboard can be blocked (e.g. non-secure context); the number stays selectable.
+    }
   }
 
   async function openHistory() {
@@ -122,8 +148,20 @@ export function CampaignCard({ id, title, summary, imageUrl, cardNumber, contact
 
         <div className="flex flex-1 flex-col px-4 pb-4">
           <h2 className="text-base font-bold leading-tight text-[#5c3418]">{title}</h2>
-          <p className="mt-1 line-clamp-2 text-xs text-[#735847]">{summary}</p>
-          {!clothesOnly ? <p className="pt-1 text-sm font-bold text-[#8b4e22]">{t.common.raised} AZN {Number(amountRaised ?? 0).toFixed(2)} / AZN {Number(amountNeeded ?? 0).toFixed(2)}</p> : null}
+          <p className={`mt-1 whitespace-pre-line text-xs text-[#735847] ${summaryExpanded ? "" : "line-clamp-2"}`}>{summary}</p>
+          {summary.length > 90 ? (
+            <button type="button" onClick={() => setSummaryExpanded((prev) => !prev)} className="self-start pt-0.5 text-xs font-semibold text-[#8b4e22] hover:underline">
+              {summaryExpanded ? t.donation.showLess : t.donation.readMore}
+            </button>
+          ) : null}
+          {!clothesOnly ? (
+            <>
+              <p className="pt-1 text-sm font-bold text-[#8b4e22]">{t.common.raised} AZN {Number(amountRaised ?? 0).toFixed(2)} / AZN {Number(amountNeeded ?? 0).toFixed(2)}</p>
+              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[#f1e4d6]" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={fundedPercent}>
+                <div className={`h-full rounded-full ${fullyFunded ? "bg-emerald-600" : "bg-[#a56131]"}`} style={{ width: `${fundedPercent}%` }} />
+              </div>
+            </>
+          ) : null}
 
           <div className="mt-auto flex items-center gap-2 pt-2">
             {!clothesOnly ? (
@@ -152,36 +190,57 @@ export function CampaignCard({ id, title, summary, imageUrl, cardNumber, contact
         </div>
       </Card>
 
-      {adminUnlocked && !clothesOnly ? (
-        <button
-          type="button"
-          className="absolute right-3 top-3 rounded-md border border-rose-200 bg-white/95 px-2 py-1 text-xs font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50"
-          onClick={async () => {
-            if (!confirm(t.donation.deleteConfirm)) return;
-            const res = await fetch(`/api/dashboard/campaigns/${id}`, { method: "DELETE" });
-            if (!res.ok) return;
-            router.refresh();
-          }}
-        >
-          {t.donation.delete}
-        </button>
+      {adminUnlocked ? (
+        <div className="absolute right-3 top-3 flex gap-1.5">
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-md border border-[#e3d5c7] bg-white/95 px-2 py-1 text-xs font-semibold text-[#623a1f] shadow-sm transition hover:bg-[#fdf7f1]"
+            onClick={() => setEditOpen(true)}
+          >
+            <Pencil className="h-3 w-3" />
+            {t.donation.edit}
+          </button>
+          {clothesOnly ? (
+            <button
+              type="button"
+              className="rounded-md border border-emerald-300 bg-white/95 px-2 py-1 text-xs font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-50"
+              onClick={() =>
+                runAdminAction(`/api/dashboard/campaigns/${id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ is_done: !visuallyDone }),
+                })
+              }
+            >
+              {visuallyDone ? t.donation.undoDone : t.donation.markAsDone}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="rounded-md border border-rose-200 bg-white/95 px-2 py-1 text-xs font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50"
+              onClick={() => {
+                if (!confirm(t.donation.deleteConfirm)) return;
+                runAdminAction(`/api/dashboard/campaigns/${id}`, { method: "DELETE" });
+              }}
+            >
+              {t.donation.delete}
+            </button>
+          )}
+        </div>
       ) : null}
-      {adminUnlocked && clothesOnly ? (
-        <button
-          type="button"
-          className="absolute right-3 top-3 rounded-md border border-emerald-300 bg-white/95 px-2 py-1 text-xs font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-50"
-          onClick={async () => {
-            const res = await fetch(`/api/dashboard/campaigns/${id}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ is_done: !visuallyDone }),
-            });
-            if (!res.ok) return;
-            router.refresh();
-          }}
-        >
-          {visuallyDone ? t.donation.undoDone : t.donation.markAsDone}
-        </button>
+
+      {editOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4">
+            <h3 className="mb-2 px-1 text-lg font-semibold text-[#61341c]">{t.donation.editDonationCall}</h3>
+            <CampaignQuickForm
+              campaignType={clothesOnly ? "clothes" : "general"}
+              hideFundingGoal={clothesOnly}
+              campaign={{ id, title, summary, imageUrl, cardNumber, contactNumber, amountNeeded }}
+              onClose={() => setEditOpen(false)}
+            />
+          </div>
+        </div>
       ) : null}
 
       {open ? (
@@ -193,7 +252,14 @@ export function CampaignCard({ id, title, summary, imageUrl, cardNumber, contact
               <div className="mt-3 space-y-3">
                 <div className="rounded-lg border border-[#e3d5c7] bg-[#fffaf5] p-3">
                   <p className="text-xs font-extrabold uppercase tracking-wide text-[#7a4b2a]">{t.donation.phoneLabel}</p>
-                  <p className="mt-1 break-all text-base font-bold text-[#5f3520]">{contactNumber || "Not provided yet"}</p>
+                  {contactNumber ? (
+                    <a href={`tel:${contactNumber.replace(/[^\d+]/g, "")}`} className="mt-1 inline-flex items-center gap-2 break-all text-base font-bold text-[#5f3520] hover:underline">
+                      <Phone className="h-4 w-4" />
+                      {contactNumber}
+                    </a>
+                  ) : (
+                    <p className="mt-1 text-base font-bold text-[#5f3520]">{t.donation.contactNotProvided}</p>
+                  )}
                 </div>
               </div>
             ) : step === 1 ? (
@@ -304,7 +370,19 @@ export function CampaignCard({ id, title, summary, imageUrl, cardNumber, contact
               <div className="mt-3 space-y-3">
                 <div className="rounded-lg border border-[#e3d5c7] bg-[#fffaf5] p-3">
                   <p className="text-xs font-extrabold uppercase tracking-wide text-[#7a4b2a]">{t.donation.cardNumberLabel}</p>
-                  <p className="mt-1 break-all text-base font-bold text-[#5f3520]">{cardNumber || t.donation.cardNumberMissing}</p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <p className="break-all text-base font-bold text-[#5f3520]">{cardNumber || t.donation.cardNumberMissing}</p>
+                    {cardNumber ? (
+                      <button
+                        type="button"
+                        onClick={copyCardNumber}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#e3d5c7] bg-white px-2.5 py-1 text-xs font-semibold text-[#623a1f] transition hover:bg-[#fdf7f1]"
+                      >
+                        {cardCopied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                        {cardCopied ? t.donation.copied : t.donation.copy}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 <input className="w-full rounded-md border border-slate-300 px-3 py-2" type="number" min="1" step="0.01" placeholder={t.donation.amountPlaceholder} value={amount} onChange={(e) => setAmount(e.target.value)} />
                 <div className="rounded-2xl border border-[#e3d5c7] bg-[#fffaf6] p-4 shadow-sm">

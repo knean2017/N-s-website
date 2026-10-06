@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Camera, HandHeart, ImagePlus, Loader2, Plus, Send, X } from "lucide-react";
+import { Camera, HandHeart, ImagePlus, Loader2, Plus, Save, Send, X } from "lucide-react";
 import { contentSchema } from "@/lib/validation";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,18 +14,40 @@ import { useLanguage } from "@/lib/i18n/context";
 
 type FormValues = z.input<typeof contentSchema>;
 
+export type EditableCampaign = {
+  id: string;
+  title: string;
+  summary: string;
+  imageUrl?: string | null;
+  cardNumber?: string | null;
+  contactNumber?: string | null;
+  amountNeeded: number;
+};
+
+const emptyValues: FormValues = { title: "", summary: "", amount_needed: 0, image_url: "", contact_number: "", card_number: "" };
+
+/**
+ * Creates a donation call, or edits one when `campaign` is passed. In edit mode
+ * the form is always open and `onClose` is called after cancel or a successful save.
+ */
 export function CampaignQuickForm({
   hideFundingGoal = false,
   campaignType = "general",
+  campaign,
+  onClose,
 }: {
   hideFundingGoal?: boolean;
   campaignType?: "general" | "clothes";
+  campaign?: EditableCampaign;
+  onClose?: () => void;
 }) {
   const router = useRouter();
   const { t } = useLanguage();
-  const [isOpen, setIsOpen] = useState(false);
+  const isEditing = Boolean(campaign);
+  const imageInputId = useId();
+  const [isOpen, setIsOpen] = useState(isEditing);
   const [error, setError] = useState<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewUrl, setPreviewUrl] = useState(campaign?.imageUrl ?? "");
   const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const {
@@ -36,14 +58,16 @@ export function CampaignQuickForm({
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(contentSchema),
-    defaultValues: {
-      title: "",
-      summary: "",
-      amount_needed: 0,
-      image_url: "",
-      contact_number: "",
-      card_number: "",
-    },
+    defaultValues: campaign
+      ? {
+          title: campaign.title,
+          summary: campaign.summary,
+          amount_needed: campaign.amountNeeded,
+          image_url: campaign.imageUrl ?? "",
+          contact_number: campaign.contactNumber ?? "",
+          card_number: campaign.cardNumber ?? "",
+        }
+      : emptyValues,
   });
 
   const imageField = register("image_url");
@@ -82,8 +106,8 @@ export function CampaignQuickForm({
   const onSubmit = async (values: FormValues) => {
     setError(null);
 
-    const response = await fetch("/api/dashboard/campaigns", {
-      method: "POST",
+    const response = await fetch(campaign ? `/api/dashboard/campaigns/${campaign.id}` : "/api/dashboard/campaigns", {
+      method: campaign ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...values,
@@ -100,14 +124,26 @@ export function CampaignQuickForm({
     }
 
     if (!response.ok) {
-      setError(data.error ?? t.forms.couldNotSubmitDonation);
+      setError(data.error ?? (isEditing ? t.forms.couldNotSaveChanges : t.forms.couldNotSubmitDonation));
       return;
     }
 
-    reset({ title: "", summary: "", amount_needed: 0, image_url: "", contact_number: "", card_number: "" });
+    router.refresh();
+    if (isEditing) {
+      onClose?.();
+      return;
+    }
+    reset(emptyValues);
     setPreviewUrl("");
     setIsOpen(false);
-    router.refresh();
+  };
+
+  const close = () => {
+    if (isEditing) {
+      onClose?.();
+      return;
+    }
+    setIsOpen(false);
   };
 
   if (!isOpen) {
@@ -126,7 +162,7 @@ export function CampaignQuickForm({
       <div className="flex justify-end">
         <button
           type="button"
-          onClick={() => setIsOpen(false)}
+          onClick={close}
           className="inline-flex items-center gap-1 rounded-md border border-[#e4d2c1] px-3 py-1 text-xs font-semibold text-[#7a4b2a] transition hover:bg-[#fff7ef]"
         >
           <X className="h-3.5 w-3.5" />
@@ -162,8 +198,8 @@ export function CampaignQuickForm({
         label={t.forms.phoneNumber}
         type="text"
         placeholder="+994..."
-        {...register("contact_number" as any)}
-        error={(errors as any).contact_number?.message}
+        {...register("contact_number")}
+        error={errors.contact_number?.message}
       />
 
       {campaignType === "general" ? (
@@ -193,14 +229,14 @@ export function CampaignQuickForm({
       <div className="rounded-xl border border-[#ddc9b7] bg-[#fffaf6] p-3">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#7a4b2a]">{t.forms.uploadImageLabel}</p>
         <label
-          htmlFor="campaign-image-file"
+          htmlFor={imageInputId}
           className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#e4d2c1] bg-white px-3 py-2 text-sm font-medium text-[#7a4b2a] transition hover:bg-[#fff7ef]"
         >
           {isUploadingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
           {isUploadingImage ? t.forms.uploading : t.forms.chooseImage}
         </label>
         <input
-          id="campaign-image-file"
+          id={imageInputId}
           type="file"
           accept="image/*"
           className="sr-only"
@@ -222,22 +258,24 @@ export function CampaignQuickForm({
         )}
       </div>
 
-      <div className="rounded-xl border border-[#decab7] bg-[#fffaf6] p-3 text-sm text-[#7b6857]">
-        <p className="inline-flex items-center gap-2">
-          <HandHeart className="h-4 w-4 text-[#8b4e22]" />
-          {t.forms.adminPublishes}
-        </p>
-      </div>
+      {!isEditing ? (
+        <div className="rounded-xl border border-[#decab7] bg-[#fffaf6] p-3 text-sm text-[#7b6857]">
+          <p className="inline-flex items-center gap-2">
+            <HandHeart className="h-4 w-4 text-[#8b4e22]" />
+            {t.forms.adminPublishes}
+          </p>
+        </div>
+      ) : null}
 
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
-      <Button type="submit" className="w-full rounded-xl py-2.5 text-base" disabled={isSubmitting}>
+      <Button type="submit" className="w-full rounded-xl py-2.5 text-base" disabled={isSubmitting || isUploadingImage}>
         {isSubmitting ? (
-          t.forms.uploading
+          isEditing ? t.forms.saving : t.forms.uploading
         ) : (
           <span className="inline-flex items-center gap-2">
-            <Send className="h-4 w-4" />
-            {t.forms.publishDonationCall}
+            {isEditing ? <Save className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+            {isEditing ? t.forms.saveChanges : t.forms.publishDonationCall}
           </span>
         )}
       </Button>
