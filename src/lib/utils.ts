@@ -21,3 +21,12 @@ export function safeExternalUrl(value: string | null | undefined): string | null
     return null;
   }
 }
+
+/**
+ * Normalizes a bank card number to digit groups of four, e.g. "4169 7388 1234 5678".
+ * Returns null for empty input so the column stays empty instead of "".
+ */
+export function formatCardNumber(value: string | null | undefined): string | null {
+  const digits = value?.replace(/\D/g, "") ?? "";
+  return digits ? digits.replace(/(\d{4})(?=\d)/g, "$1 ") : null;
+}

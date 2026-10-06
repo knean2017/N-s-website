@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { contentSchema } from "@/lib/validation";
 import { requireAdminApiAccess } from "@/lib/admin-access";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { expireCampaignCaches } from "@/lib/campaign-cache";
+import { formatCardNumber } from "@/lib/utils";
 
 export async function POST(request: Request) {
   const authError = await requireAdminApiAccess();
@@ -21,7 +23,7 @@ export async function POST(request: Request) {
   }
   const campaignType = payload?.campaign_type === "clothes" ? "clothes" : "general";
 
-  const { title, summary, amount_needed, image_url, contact_number } = parsed.data;
+  const { title, summary, amount_needed, image_url, contact_number, card_number } = parsed.data;
   const { error } = await supabase.from("campaigns").insert({
     organization_id: organizationId,
     campaign_type: campaignType,
@@ -29,6 +31,8 @@ export async function POST(request: Request) {
     summary,
     image_url: image_url || null,
     contact_number: contact_number || null,
+    // Clothes calls collect items, not money, so they never show a card number.
+    card_number: campaignType === "general" ? formatCardNumber(card_number) : null,
     amount_needed,
     amount_raised: 0,
     status: "published",
@@ -37,6 +41,8 @@ export async function POST(request: Request) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
+
+  expireCampaignCaches();
 
   return NextResponse.json({ ok: true });
 }

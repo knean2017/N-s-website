@@ -42,7 +42,15 @@ export const contentSchema = z.object({
   amount_needed: z.coerce.number().min(0).optional(),
   price: z.coerce.number().min(0).optional(),
   contact_number: z.string().min(5).optional(),
-  card_number: z.string().min(8).optional(),
+  card_number: z
+    .string()
+    .trim()
+    // Accept the digits with optional spaces/dashes, e.g. "4169 7388 1234 5678".
+    .refine((value) => /^[\d\s-]+$/.test(value) && /^\d{12,19}$/.test(value.replace(/[\s-]/g, "")), {
+      message: "Card number must contain 12-19 digits",
+    })
+    .optional()
+    .or(z.literal("")),
   image_url: z.string().url().optional().or(z.literal("")),
 });
 

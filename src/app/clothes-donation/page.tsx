@@ -17,7 +17,7 @@ const getClothesCampaigns = unstable_cache(
     return data;
   },
   ["campaigns-clothes-published"],
-  { revalidate: 60 }
+  { revalidate: 60, tags: ["campaigns-clothes-published"] }
 );
 
 export default async function ClothesDonationPage() {
