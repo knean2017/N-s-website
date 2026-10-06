@@ -21,7 +21,10 @@ export async function POST(request: Request) {
   }
   const campaignType = payload?.campaign_type === "clothes" ? "clothes" : "general";
 
-  const { title, summary, amount_needed, image_url, contact_number } = parsed.data;
+  const { title, summary, amount_needed, image_url, contact_number, card_number } = parsed.data;
+  // Clothes calls collect items, not money, so they never show a card number.
+  const cardDigits = campaignType === "general" ? card_number?.replace(/\D/g, "") : "";
+  const formattedCardNumber = cardDigits ? cardDigits.replace(/(\d{4})(?=\d)/g, "$1 ") : null;
   const { error } = await supabase.from("campaigns").insert({
     organization_id: organizationId,
     campaign_type: campaignType,
@@ -29,6 +32,7 @@ export async function POST(request: Request) {
     summary,
     image_url: image_url || null,
     contact_number: contact_number || null,
+    card_number: formattedCardNumber,
     amount_needed,
     amount_raised: 0,
     status: "published",

@@ -42,6 +42,7 @@ export function CampaignQuickForm({
       amount_needed: 0,
       image_url: "",
       contact_number: "",
+      card_number: "",
     },
   });
 
@@ -103,7 +104,7 @@ export function CampaignQuickForm({
       return;
     }
 
-    reset({ title: "", summary: "", amount_needed: 0, image_url: "", contact_number: "" });
+    reset({ title: "", summary: "", amount_needed: 0, image_url: "", contact_number: "", card_number: "" });
     setPreviewUrl("");
     setIsOpen(false);
     router.refresh();
@@ -164,6 +165,18 @@ export function CampaignQuickForm({
         {...register("contact_number" as any)}
         error={(errors as any).contact_number?.message}
       />
+
+      {campaignType === "general" ? (
+        <Input
+          label={t.forms.cardNumber}
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder="4169 0000 0000 0000"
+          {...register("card_number")}
+          error={errors.card_number?.message}
+        />
+      ) : null}
 
       <Input
         label={t.forms.imageUrl}
